@@ -1,0 +1,5 @@
+{
+  "name": "Snake 2048.io",
+  "description": "A hybrid casual game combining Snake mechanics with 2048 puzzle logic. Eat numbers to grow, defeat other snakes, and dominate the arena.",
+  "requestFramePermissions": []
+}

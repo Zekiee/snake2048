@@ -6,7 +6,7 @@ import { Trophy, Skull, Play, Zap, RotateCcw } from 'lucide-react';
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [score, setScore] = useState(0);
-  const [playerName, setPlayerName] = useState('Snake_Player 2');
+  const [playerName, setPlayerName] = useState('Snake_Player 1');
   const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; isMe: boolean }[]>([]);
   const [killFeed, setKillFeed] = useState<KillEvent[]>([]);
   
@@ -32,7 +32,7 @@ export default function App() {
   };
 
   return (
-    <div className="relative w-full h-screen bg-gray-900 text-white font-sans overflow-hidden select-none touch-none">
+    <div className="fixed inset-0 w-full h-full bg-gray-900 text-white font-sans overflow-hidden select-none touch-none">
       
       {/* Game Layer */}
       <GameCanvas 
@@ -58,7 +58,7 @@ export default function App() {
                     <div className="text-3xl font-black text-yellow-400">{Math.floor(score)}</div>
                 </div>
                 
-                {/* Kill Feed (Hidden on very small screens if needed, but keeping for now) */}
+                {/* Kill Feed */}
                 <div className="bg-black/30 backdrop-blur-sm p-2 rounded-lg border border-white/5 max-w-[180px] md:max-w-[200px]">
                    <div className="text-[10px] text-gray-400 mb-1 font-bold">KILL FEED</div>
                    {killFeed.map((k, i) => (
@@ -90,7 +90,7 @@ export default function App() {
                  </div>
               </div>
 
-              {/* Bottom Right: Dash Button (Mobile & PC Friendly) */}
+              {/* Bottom Right: Dash Button */}
               <div className="absolute bottom-8 right-8 pointer-events-auto">
                   <button 
                     className="w-20 h-20 md:w-24 md:h-24 bg-yellow-500 hover:bg-yellow-400 rounded-full shadow-[0_0_20px_rgba(234,179,8,0.4)] border-4 border-yellow-600 flex items-center justify-center transition-transform active:scale-90"
@@ -107,7 +107,7 @@ export default function App() {
                   </div>
               </div>
 
-              {/* Bottom Center: Controls Hint (PC Only usually, but fine here) */}
+              {/* Bottom Center: Controls Hint */}
               <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-white/30 text-xs font-medium pointer-events-none hidden md:block">
                 Hold <span className="text-yellow-400 font-bold">SPACE</span> or <span className="text-yellow-400 font-bold">CLICK</span> to Dash
               </div>
@@ -117,9 +117,8 @@ export default function App() {
 
       {/* --- Main Menu --- */}
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-gray-900/90 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-           <div className="bg-gray-800 p-6 md:p-8 rounded-2xl shadow-2xl border border-gray-700 max-w-md w-full text-center relative overflow-hidden animate-in fade-in zoom-in duration-300">
-              {/* Background Glow */}
+        <div className="absolute inset-0 bg-gray-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+           <div className="bg-gray-800/90 p-6 md:p-8 rounded-2xl shadow-2xl border border-gray-700 max-w-md w-full text-center relative overflow-hidden animate-in fade-in zoom-in duration-300">
               <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500"></div>
 
               <h1 className="text-5xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-orange-500 filter drop-shadow-lg">
@@ -134,7 +133,7 @@ export default function App() {
                         type="text" 
                         value={playerName} 
                         onChange={(e) => setPlayerName(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white font-bold text-lg focus:outline-none focus:border-yellow-500 transition-colors"
+                        className="w-full bg-gray-900/80 border border-gray-700 rounded-lg px-4 py-3 text-white font-bold text-lg focus:outline-none focus:border-yellow-500 transition-colors"
                         placeholder="Enter Name..."
                         maxLength={12}
                       />
@@ -179,7 +178,6 @@ export default function App() {
                   <button 
                     className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 transition-colors border border-purple-400/50 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
                     onClick={() => {
-                        // Fake Ad Revive
                         setGameState(GameState.PLAYING);
                     }}
                   >

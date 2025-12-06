@@ -23,7 +23,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
-  // Game State Refs (Mutable for performance, bypassing React Render Cycle)
+  // Game State Refs
   const playerRef = useRef<Snake | null>(null);
   const botsRef = useRef<Snake[]>([]);
   const foodsRef = useRef<Food[]>([]);
@@ -31,12 +31,23 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const textsRef = useRef<FloatingText[]>([]);
   const killFeedRef = useRef<KillEvent[]>([]);
   
+  // State tracking for Loop
+  const gameStateRef = useRef(gameState);
+  const initializedRef = useRef(false);
+
   // Inputs
-  // isDown internal tracks Mouse Click. controlsRef tracks UI Button press.
   const mouseRef = useRef<{ x: number; y: number; isDown: boolean }>({ x: 0, y: 0, isDown: false });
   const cameraRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const animationFrameRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(0);
+
+  // Sync prop to ref
+  useEffect(() => {
+    // If transitioning TO playing from MENU/GAMEOVER, we might want to respawn player
+    if (gameState === GameState.PLAYING && gameStateRef.current !== GameState.PLAYING) {
+       startPlayerRun();
+    }
+    gameStateRef.current = gameState;
+  }, [gameState, playerName]);
 
   // --- Helper Functions ---
 
@@ -46,13 +57,12 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   });
 
   const createFood = (): Food => {
-    // Weighted Randomness: Heavily favor '2' so players can actually eat
     const r = Math.random();
     let valExp = 1;
-    if (r > 0.95) valExp = 4;       // 16 (5%)
-    else if (r > 0.85) valExp = 3;  // 8 (10%)
-    else if (r > 0.60) valExp = 2;  // 4 (25%)
-    else valExp = 1;                // 2 (60%)
+    if (r > 0.95) valExp = 4;       
+    else if (r > 0.85) valExp = 3;  
+    else if (r > 0.60) valExp = 2;  
+    else valExp = 1;                
 
     const value = Math.pow(2, valExp); 
     
@@ -81,7 +91,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       speed: 0,
       baseSpeed: 3,
       turnSpeed: 0.08,
-      body: Array(10).fill(startPos), // Initial length
+      body: Array(10).fill(startPos),
       score: 0,
       isBot,
       isDead: false,
@@ -111,7 +121,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       x, y,
       text,
       life: 1.0,
-      vy: -1, // float up
+      vy: -1,
       color,
       size: 20,
     });
@@ -125,8 +135,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // --- Game Logic ---
 
-  const initGame = () => {
-    playerRef.current = createSnake(false, playerName || "You");
+  const initWorld = () => {
     botsRef.current = Array.from({ length: INITIAL_BOT_COUNT }).map(() => 
       createSnake(true, BOT_NAMES[Math.floor(Math.random() * BOT_NAMES.length)])
     );
@@ -134,17 +143,25 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     particlesRef.current = [];
     textsRef.current = [];
     killFeedRef.current = [];
-    setScore(0);
-    setKillFeed([]);
+    initializedRef.current = true;
+  };
+
+  const startPlayerRun = () => {
+      // Re-initialize bots/food if world is empty, otherwise just add player
+      if (!initializedRef.current) initWorld();
+      
+      playerRef.current = createSnake(false, playerName || "You");
+      setScore(0);
+      setKillFeed([]);
+      
+      // Ensure player spawns away from immediate danger if possible? 
+      // For now random is fine.
   };
 
   const updateSnake = (snake: Snake, dt: number) => {
     if (snake.isDead) return;
 
-    // 1. AI or Input Logic
     if (snake.isBot) {
-      // Simple AI: Wander and seek food
-      // Check for nearby food
       let nearestFood: Food | null = null;
       let minDist = 300;
       
@@ -152,7 +169,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         const dx = f.x - snake.x;
         const dy = f.y - snake.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDist && f.value <= snake.value) { // Only chase eatable food
+        if (dist < minDist && f.value <= snake.value) { 
           minDist = dist;
           nearestFood = f;
         }
@@ -162,64 +179,46 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         snake.targetAngle = Math.atan2(nearestFood.y - snake.y, nearestFood.x - snake.x);
         snake.dashing = true; 
       } else {
-         // Wander
          snake.dashing = false;
          if (Math.random() < 0.02) {
            snake.targetAngle += (Math.random() - 0.5) * 2;
          }
       }
     } else {
-      // Player Input
       const dx = mouseRef.current.x - window.innerWidth / 2;
       const dy = mouseRef.current.y - window.innerHeight / 2;
       snake.targetAngle = Math.atan2(dy, dx);
-      
-      // Dash if MouseDown OR UI Button Pressed
       snake.dashing = mouseRef.current.isDown || controlsRef.current.dashing;
     }
 
-    // 2. Physics & Movement
-    // Smooth angle interpolation
     let diff = snake.targetAngle - snake.angle;
     while (diff < -Math.PI) diff += Math.PI * 2;
     while (diff > Math.PI) diff -= Math.PI * 2;
     snake.angle += diff * snake.turnSpeed;
 
-    // Speed calculation
     const currentSpeed = snake.dashing ? snake.baseSpeed * 1.8 : snake.baseSpeed;
     
-    // Move Head
-    const vx = Math.cos(snake.angle) * currentSpeed;
-    const vy = Math.sin(snake.angle) * currentSpeed;
-    
-    snake.x += vx;
-    snake.y += vy;
+    snake.x += Math.cos(snake.angle) * currentSpeed;
+    snake.y += Math.sin(snake.angle) * currentSpeed;
 
-    // Boundaries
     const limit = MAP_SIZE / 2;
     if (snake.x < -limit || snake.x > limit || snake.y < -limit || snake.y > limit) {
-       snake.isDead = true; // Wall collision
+       snake.isDead = true; 
        return;
     }
 
-    // Move Body (Trail effect)
-    // We only add a new body point every few frames based on speed to prevent clustering
     const distToLast = Math.hypot(snake.x - snake.body[0].x, snake.y - snake.body[0].y);
-    if (distToLast > 10) { // Gap between segments
+    if (distToLast > 10) { 
         snake.body.unshift({ x: snake.x, y: snake.y });
-        // Calculate max length based on value/score
         const maxBodyLength = 10 + Math.floor(snake.score / 10) + Math.log2(snake.value) * 5;
         if (snake.body.length > maxBodyLength) {
             snake.body.pop();
         }
     }
 
-    // Update Color based on value
     snake.color = getSnakeColor(snake.value);
     
-    // Dashing cost
     if (snake.dashing && !snake.isBot && snake.score > 2) {
-        // Decrease score slowly
         snake.score -= 0.1;
         if (Math.random() < 0.2) {
             spawnParticles(snake.body[snake.body.length-1].x, snake.body[snake.body.length-1].y, snake.color, 1);
@@ -232,18 +231,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const allSnakes = [playerRef.current, ...botsRef.current].filter(s => s && !s.isDead) as Snake[];
 
     allSnakes.forEach(snake => {
-        // 1. Food Collision
+        // Food Collision
         for (let i = foodsRef.current.length - 1; i >= 0; i--) {
             const f = foodsRef.current[i];
             const dist = Math.hypot(snake.x - f.x, snake.y - f.y);
             
             if (dist < snake.radius + f.radius) {
-                // Eat Food Logic
                 if (f.value <= snake.value) {
-                    // Successful Eat
                     snake.score += f.value;
-                    
-                    // Upgrade logic: Eat same value -> Double Head Value
                     if (f.value === snake.value) {
                         snake.value *= 2;
                         spawnFloatingText(snake.x, snake.y, "UPGRADE!", "#fff");
@@ -251,76 +246,59 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     } else {
                         spawnFloatingText(snake.x, snake.y, `+${f.value}`, f.color);
                     }
-                    
                     if (!snake.isBot) setScore(snake.score);
-                    
                     foodsRef.current.splice(i, 1);
-                    foodsRef.current.push(createFood()); // Respawn immediately
+                    foodsRef.current.push(createFood()); 
                 } else {
-                    // Hit bigger food - Physical Bounce effect
                     const angle = Math.atan2(snake.y - f.y, snake.x - f.x);
                     const force = 5;
                     snake.x += Math.cos(angle) * force;
                     snake.y += Math.sin(angle) * force;
-                    
-                    // Visual feedback for player
-                    if (!snake.isBot && Math.random() < 0.05) {
-                        spawnFloatingText(f.x, f.y, "Too Big!", "#ff4444");
-                    }
                 }
             }
         }
 
-        // 2. Snake vs Snake
+        // Snake vs Snake
         allSnakes.forEach(other => {
             if (snake.id === other.id) return;
             
-            // Head to Head
             const distHeads = Math.hypot(snake.x - other.x, snake.y - other.y);
             if (distHeads < snake.radius + other.radius) {
                 if (snake.value > other.value) {
-                    // Snake eats Other
                     other.isDead = true;
                     snake.score += other.score / 2;
                     spawnParticles(other.x, other.y, other.color, 20);
                     addKillLog(snake.name, other.name);
                     snake.killCount++;
                 } else if (snake.value < other.value) {
-                    // Snake gets eaten
                     snake.isDead = true;
                     other.score += snake.score / 2;
                     spawnParticles(snake.x, snake.y, snake.color, 20);
                     addKillLog(other.name, snake.name);
                     other.killCount++;
                 } else {
-                    // Equal value - Bounce apart to avoid instant mutual death usually
                     const angle = Math.atan2(snake.y - other.y, snake.x - other.x);
                     snake.x += Math.cos(angle) * 10;
                     snake.y += Math.sin(angle) * 10;
                     other.x -= Math.cos(angle) * 10;
                     other.y -= Math.sin(angle) * 10;
-                    spawnParticles(snake.x, snake.y, "#fff", 5);
                 }
             }
 
-            // Head to Body
-            // Checking every point is expensive. Check every 3rd point.
             for (let k = 0; k < other.body.length; k+=3) {
                 const b = other.body[k];
                 const distBody = Math.hypot(snake.x - b.x, snake.y - b.y);
-                if (distBody < snake.radius + BASE_RADIUS * 0.8) { // Body slightly smaller
+                if (distBody < snake.radius + BASE_RADIUS * 0.8) { 
                     snake.isDead = true;
-                    // Drop food where died
                     for(let f=0; f<5; f++) {
                         const dropped = createFood();
                         dropped.x = snake.x + (Math.random()-0.5)*50;
                         dropped.y = snake.y + (Math.random()-0.5)*50;
-                        dropped.value = Math.max(2, snake.value / 2); // Drop half value
+                        dropped.value = Math.max(2, snake.value / 2); 
                         dropped.color = getSnakeColor(dropped.value);
                         foodsRef.current.push(dropped);
                     }
-                    
-                    other.score += 50; // Bonus for kill
+                    other.score += 50; 
                     addKillLog(other.name, snake.name);
                     other.killCount++;
                     break;
@@ -331,28 +309,41 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   };
 
   const draw = (ctx: CanvasRenderingContext2D) => {
-    const player = playerRef.current;
-    if (!player) return;
-
     const width = ctx.canvas.width;
     const height = ctx.canvas.height;
+    const player = playerRef.current;
+    const isPlaying = gameStateRef.current === GameState.PLAYING;
+    const isMenu = gameStateRef.current === GameState.MENU;
 
     // Clear Screen
     ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(0, 0, width, height);
 
-    // Camera follow player
-    if (!player.isDead) {
-        // Lerp camera
-        cameraRef.current.x += (player.x - cameraRef.current.x) * 0.1;
-        cameraRef.current.y += (player.y - cameraRef.current.y) * 0.1;
+    // Camera Logic
+    let camTarget = { x: 0, y: 0 };
+    
+    if (isPlaying && player && !player.isDead) {
+        camTarget = { x: player.x, y: player.y };
+    } else if (isMenu) {
+        // Follow a random bot or center in Menu
+        if (botsRef.current.length > 0) {
+            const bot = botsRef.current[0];
+            camTarget = { x: bot.x, y: bot.y };
+        }
+    } else if (player && player.isDead) {
+        // Stay on dead player spot
+        camTarget = { x: player.x, y: player.y };
     }
+
+    cameraRef.current.x += (camTarget.x - cameraRef.current.x) * 0.1;
+    cameraRef.current.y += (camTarget.y - cameraRef.current.y) * 0.1;
+
     
     ctx.save();
     ctx.translate(width / 2 - cameraRef.current.x, height / 2 - cameraRef.current.y);
 
     // 1. Draw Grid
-    ctx.strokeStyle = '#333';
+    ctx.strokeStyle = '#2a2a2a'; // slightly lighter than bg
     ctx.lineWidth = 2;
     const gridSize = 100;
     const startX = Math.floor((cameraRef.current.x - width/2) / gridSize) * gridSize;
@@ -371,25 +362,20 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     }
     ctx.stroke();
 
-    // Draw Map Borders
-    ctx.strokeStyle = '#ff0000';
+    // Map Borders
+    ctx.strokeStyle = '#444';
     ctx.lineWidth = 10;
     ctx.strokeRect(-MAP_SIZE/2, -MAP_SIZE/2, MAP_SIZE, MAP_SIZE);
 
     // 2. Draw Food
     foodsRef.current.forEach(f => {
-        // Grow animation
         if (f.currentSize < f.targetSize) f.currentSize += 0.5;
-
         ctx.fillStyle = f.color;
-        // Rounded rect for 2048 look
-        ctx.beginPath();
-        // ctx.arc(f.x, f.y, f.currentSize, 0, Math.PI * 2);
         const r = f.currentSize;
+        ctx.beginPath();
         ctx.roundRect(f.x - r, f.y - r, r*2, r*2, 4);
         ctx.fill();
 
-        // Number
         ctx.fillStyle = getTextColor(f.value);
         ctx.font = `bold ${Math.floor(r)}px Arial`;
         ctx.textAlign = 'center';
@@ -398,8 +384,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     });
 
     // 3. Draw Snakes
-    const allSnakes = [...botsRef.current, player];
-    // Sort by y to fake depth or just draw player last? Draw dead last.
+    const allSnakes = [...botsRef.current];
+    if (player) allSnakes.push(player);
     
     allSnakes.forEach(snake => {
         if (snake.isDead) return;
@@ -418,9 +404,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
             }
             ctx.stroke();
             
-            // Inner line for 2048 style detail
             ctx.lineWidth = snake.radius * 1.0;
-            ctx.strokeStyle = `${snake.color}88`; // slightly transparent
+            ctx.strokeStyle = `${snake.color}88`; 
             ctx.stroke();
         }
 
@@ -433,7 +418,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Draw Value on Head
+        // Draw Value
         ctx.fillStyle = getTextColor(snake.value);
         ctx.font = `bold ${Math.floor(snake.radius)}px Arial`;
         ctx.textAlign = 'center';
@@ -443,11 +428,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         // Name Tag
         ctx.fillStyle = '#fff';
         ctx.font = '12px Arial';
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 4;
         ctx.fillText(snake.name, snake.x, snake.y - snake.radius - 15);
-        // Level/Score
-        ctx.font = '10px Arial';
-        ctx.fillStyle = '#aaa';
-        ctx.fillText(`Score: ${Math.floor(snake.score)}`, snake.x, snake.y - snake.radius - 5);
+        ctx.shadowBlur = 0;
     });
 
     // 4. Particles
@@ -479,35 +463,34 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // --- Main Loop ---
 
   useEffect(() => {
-    if (gameState !== GameState.PLAYING) return;
+    // Initialize World (Bots/Food) once
+    if (!initializedRef.current) initWorld();
     
-    // Init if needed
-    if (!playerRef.current) initGame();
-    
-    // Resume loop
     let lastTime = performance.now();
     const loop = (time: number) => {
-        const dt = (time - lastTime) / 16.66; // Normalize to 60fps
+        const dt = (time - lastTime) / 16.66; 
         lastTime = time;
 
         const canvas = canvasRef.current;
         if (canvas) {
             const ctx = canvas.getContext('2d');
             if (ctx) {
-                // Update Entities
-                if (playerRef.current && !playerRef.current.isDead) {
-                    updateSnake(playerRef.current, dt);
-                } else if (playerRef.current && playerRef.current.isDead) {
-                    setGameState(GameState.GAME_OVER);
-                    playerRef.current = null; // Prevent re-trigger
-                    return;
+                const isPlaying = gameStateRef.current === GameState.PLAYING;
+
+                // Update Player
+                if (isPlaying && playerRef.current) {
+                    if (!playerRef.current.isDead) {
+                        updateSnake(playerRef.current, dt);
+                    } else {
+                        // Player Died
+                        setGameState(GameState.GAME_OVER);
+                    }
                 }
 
                 // Update Bots
                 botsRef.current.forEach((bot, index) => {
                     if (bot.isDead) {
-                        // Respawn bot after delay or create new one immediately
-                        botsRef.current[index] = createSnake(true, BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)]);
+                         botsRef.current[index] = createSnake(true, BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)]);
                     } else {
                         updateSnake(bot, dt);
                     }
@@ -532,14 +515,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 checkCollisions();
 
-                // Periodic Updates to React State (Low frequency)
+                // Periodic Updates
                 if (animationFrameRef.current % 30 === 0) {
-                    const all = [...botsRef.current, playerRef.current].filter(s => s && !s.isDead) as Snake[];
+                    const all = [...botsRef.current];
+                    if (playerRef.current && !playerRef.current.isDead) all.push(playerRef.current);
+                    
                     const sorted = all.sort((a, b) => b.score - a.score).slice(0, 5);
                     setLeaderboard(sorted.map(s => ({ 
                         name: s.name, 
                         score: Math.floor(s.score), 
-                        isMe: !s.isBot 
+                        isMe: !s.isBot && s.id === playerRef.current?.id
                     })));
                 }
 
@@ -554,8 +539,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     return () => {
         cancelAnimationFrame(animationFrameRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameState]);
+  }, []); // Run once! State accessed via refs.
 
   // Handle Resize
   useEffect(() => {
@@ -572,7 +556,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
   // Handle Input
   useEffect(() => {
-    // --- Mouse (PC) ---
     const handleMouseMove = (e: MouseEvent) => {
         mouseRef.current.x = e.clientX;
         mouseRef.current.y = e.clientY;
@@ -580,20 +563,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     const handleMouseDown = () => { mouseRef.current.isDown = true; };
     const handleMouseUp = () => { mouseRef.current.isDown = false; };
     
-    // --- Touch (Mobile) ---
     const handleTouchMove = (e: TouchEvent) => {
-        // Prevent default to avoid scrolling
         e.preventDefault();
         if (e.touches.length > 0) {
             mouseRef.current.x = e.touches[0].clientX;
             mouseRef.current.y = e.touches[0].clientY;
-            // Note: We DO NOT set isDown = true here. 
-            // Dashing on mobile is handled by a separate UI button via controlsRef.
         }
     };
     const handleTouchStart = (e: TouchEvent) => {
          if (e.target === canvasRef.current) {
-             e.preventDefault(); // Stop unwanted gestures
+             e.preventDefault();
              if (e.touches.length > 0) {
                 mouseRef.current.x = e.touches[0].clientX;
                 mouseRef.current.y = e.touches[0].clientY;
@@ -601,7 +580,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
          }
     };
 
-    // --- Keyboard (PC Dash) ---
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.code === 'Space') mouseRef.current.isDown = true;
     };
@@ -613,7 +591,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
     
-    // Passive: false is crucial for preventing scrolling on iOS
     window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('touchstart', handleTouchStart, { passive: false });
 

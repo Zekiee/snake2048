@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react';
-import { GameState, Snake, Food, Particle, Point, FloatingText, KillEvent } from '../types';
+import { GameState, Snake, Food, Particle, FloatingText, KillEvent, Point } from '../types';
 import { MAP_SIZE, INITIAL_SNAKE_VALUE, BASE_RADIUS, BOT_NAMES, getSnakeColor, getTextColor, INITIAL_BOT_COUNT, FOOD_COUNT } from '../constants';
 
 interface GameCanvasProps {
@@ -30,6 +30,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   const particlesRef = useRef<Particle[]>([]);
   const textsRef = useRef<FloatingText[]>([]);
   const killFeedRef = useRef<KillEvent[]>([]);
+  const attractModeTargetIndex = useRef<number>(0);
   
   // State tracking for Loop
   const gameStateRef = useRef(gameState);
@@ -153,9 +154,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
       playerRef.current = createSnake(false, playerName || "You");
       setScore(0);
       setKillFeed([]);
-      
-      // Ensure player spawns away from immediate danger if possible? 
-      // For now random is fine.
   };
 
   const updateSnake = (snake: Snake, dt: number) => {
@@ -325,13 +323,18 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     if (isPlaying && player && !player.isDead) {
         camTarget = { x: player.x, y: player.y };
     } else if (isMenu) {
-        // Follow a random bot or center in Menu
+        // Follow a random bot in Menu to make it look alive
         if (botsRef.current.length > 0) {
-            const bot = botsRef.current[0];
-            camTarget = { x: bot.x, y: bot.y };
+            const index = attractModeTargetIndex.current % botsRef.current.length;
+            const bot = botsRef.current[index];
+            if (bot && !bot.isDead) {
+              camTarget = { x: bot.x, y: bot.y };
+            } else {
+              // If target dead, switch
+              attractModeTargetIndex.current++;
+            }
         }
     } else if (player && player.isDead) {
-        // Stay on dead player spot
         camTarget = { x: player.x, y: player.y };
     }
 
@@ -343,7 +346,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     ctx.translate(width / 2 - cameraRef.current.x, height / 2 - cameraRef.current.y);
 
     // 1. Draw Grid
-    ctx.strokeStyle = '#2a2a2a'; // slightly lighter than bg
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; 
     ctx.lineWidth = 2;
     const gridSize = 100;
     const startX = Math.floor((cameraRef.current.x - width/2) / gridSize) * gridSize;
@@ -463,9 +466,15 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
   // --- Main Loop ---
 
   useEffect(() => {
-    // Initialize World (Bots/Food) once
+    // Force init world immediately
     if (!initializedRef.current) initWorld();
     
+    // Initial resize
+    if (canvasRef.current) {
+        canvasRef.current.width = window.innerWidth;
+        canvasRef.current.height = window.innerHeight;
+    }
+
     let lastTime = performance.now();
     const loop = (time: number) => {
         const dt = (time - lastTime) / 16.66; 
@@ -487,7 +496,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
                 }
 
-                // Update Bots
+                // Update Bots (ALWAYS update bots for attract mode background)
                 botsRef.current.forEach((bot, index) => {
                     if (bot.isDead) {
                          botsRef.current[index] = createSnake(true, BOT_NAMES[Math.floor(Math.random()*BOT_NAMES.length)]);
@@ -495,6 +504,11 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
                         updateSnake(bot, dt);
                     }
                 });
+
+                // Periodic bot switch for attract mode
+                if (animationFrameRef.current % 300 === 0) {
+                     attractModeTargetIndex.current = Math.floor(Math.random() * botsRef.current.length);
+                }
 
                 // Update Particles
                 for (let i = particlesRef.current.length - 1; i >= 0; i--) {
@@ -515,7 +529,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
 
                 checkCollisions();
 
-                // Periodic Updates
+                // Periodic Updates (Leaderboard)
                 if (animationFrameRef.current % 30 === 0) {
                     const all = [...botsRef.current];
                     if (playerRef.current && !playerRef.current.isDead) all.push(playerRef.current);
@@ -550,7 +564,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     };
     window.addEventListener('resize', handleResize);
-    handleResize();
+    handleResize(); // call immediately
+    // Safety check for mobile URL bar resize
+    setTimeout(handleResize, 100);
+    
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
@@ -571,6 +588,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         }
     };
     const handleTouchStart = (e: TouchEvent) => {
+         // Only track touch if on canvas to allow UI buttons
          if (e.target === canvasRef.current) {
              e.preventDefault();
              if (e.touches.length > 0) {
@@ -591,8 +609,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
     
-    window.addEventListener('touchmove', handleTouchMove, { passive: false });
-    window.addEventListener('touchstart', handleTouchStart, { passive: false });
+    // Add to window/document to catch drags outside canvas
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
@@ -601,14 +620,14 @@ const GameCanvas: React.FC<GameCanvasProps> = ({
         window.removeEventListener('mousemove', handleMouseMove);
         window.removeEventListener('mousedown', handleMouseDown);
         window.removeEventListener('mouseup', handleMouseUp);
-        window.removeEventListener('touchmove', handleTouchMove);
-        window.removeEventListener('touchstart', handleTouchStart);
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchstart', handleTouchStart);
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full cursor-crosshair touch-none" />;
+  return <canvas ref={canvasRef} className="absolute top-0 left-0 w-full h-full cursor-crosshair touch-none outline-none" />;
 };
 
 export default GameCanvas;

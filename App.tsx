@@ -6,7 +6,7 @@ import { Trophy, Skull, Play, Zap, RotateCcw } from 'lucide-react';
 export default function App() {
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [score, setScore] = useState(0);
-  const [playerName, setPlayerName] = useState('Snake_Player 1');
+  const [playerName, setPlayerName] = useState('Snake_Player 2');
   const [leaderboard, setLeaderboard] = useState<{ name: string; score: number; isMe: boolean }[]>([]);
   const [killFeed, setKillFeed] = useState<KillEvent[]>([]);
   
